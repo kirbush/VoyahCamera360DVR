@@ -2,3 +2,4 @@
 *.bat text eol=crlf
 *.jar binary
 *.apk binary
+LICENSE -text
