@@ -1,0 +1,87 @@
+import java.security.MessageDigest
+
+plugins { id 'com.android.application' }
+
+def generatedAvm = layout.buildDirectory.dir('generated/avm')
+def customKeystore = providers.environmentVariable('VOYAH_SIGNING_KEYSTORE').orNull
+android {
+    namespace 'local.codex.voyahcameralab'
+    compileSdk 30
+    buildToolsVersion '35.0.0'
+    ndkVersion '27.2.12479018'
+    defaultConfig {
+        applicationId 'local.codex.voyahcameralab'
+        minSdk 30
+        targetSdk 30
+        versionCode 3
+        versionName '0.3-evening-test'
+        testApplicationId 'local.codex.voyahcameratest'
+        testInstrumentationRunner 'local.codex.voyahcameratest.Smoke'
+    }
+    signingConfigs {
+        if (customKeystore) {
+            localDevelopment {
+                storeFile file(customKeystore)
+                storePassword providers.environmentVariable('VOYAH_SIGNING_STORE_PASSWORD').getOrElse('android')
+                keyAlias providers.environmentVariable('VOYAH_SIGNING_KEY_ALIAS').getOrElse('cameralab')
+                keyPassword providers.environmentVariable('VOYAH_SIGNING_KEY_PASSWORD').getOrElse('android')
+            }
+        }
+    }
+    buildTypes {
+        debug { if (customKeystore) signingConfig signingConfigs.localDevelopment }
+        release { minifyEnabled false }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    sourceSets.main.java.srcDir(generatedAvm.map { it.dir('java') })
+    sourceSets.main.assets.srcDir(generatedAvm.map { it.dir('assets') })
+}
+
+def avmTask = tasks.register('generateAvmHelper') {
+    inputs.files(fileTree('src/main/cpp')).withPropertyName('nativeSources')
+    inputs.property('ndkVersion', '27.2.12479018')
+    outputs.dir(generatedAvm)
+    doLast {
+        String override = providers.gradleProperty('avmNdkDir').orElse(providers.environmentVariable('AVM_NDK_DIR')).orNull
+        File ndk = override ? file(override) : new File(android.sdkDirectory, 'ndk/27.2.12479018')
+        boolean windows = System.getProperty('os.name').toLowerCase().contains('windows')
+        String host = windows ? 'windows-x86_64' : System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin-x86_64' : 'linux-x86_64'
+        File prebuilt = new File(ndk, 'bin/clang' + (windows ? '.exe' : '')).isFile() ? ndk : new File(ndk, "toolchains/llvm/prebuilt/${host}")
+        File clang = new File(prebuilt, 'bin/clang' + (windows ? '.exe' : ''))
+        if (!clang.isFile()) throw new GradleException('Install NDK 27.2.12479018 or set AVM_NDK_DIR')
+        File assets = generatedAvm.get().dir('assets').asFile
+        File source = generatedAvm.get().dir('java/local/codex/voyahcameralab').asFile
+        assets.mkdirs(); source.mkdirs()
+        File helper = new File(assets, 'avm-control-arm64')
+        project.exec {
+            commandLine clang, '--target=aarch64-linux-android30', '--sysroot=' + new File(prebuilt,'sysroot'),
+                '-O2', '-Wall', '-Wextra', '-Werror', '-fPIE', '-pie', '-unwindlib=none', '-Wl,-z,relro,-z,now',
+                '-o', helper, file('src/main/cpp/avm_control.c'), '-ldl'
+        }
+        String sha = MessageDigest.getInstance('SHA-256').digest(helper.bytes).encodeHex().toString()
+        new File(source, 'NativeBuild.java').setText('package local.codex.voyahcameralab; final class NativeBuild { static final String HELPER_SHA256="'+sha+'"; }', 'UTF-8')
+    }
+}
+tasks.named('preBuild').configure { dependsOn avmTask }
+tasks.configureEach {
+    if (name.startsWith('merge') && name.endsWith('Assets') || name.startsWith('compile') && name.endsWith('JavaWithJavac')) dependsOn avmTask
+}
+
+def policyClasses = layout.buildDirectory.dir('policy-classes')
+def policyCompile = tasks.register('compileCorePolicyTest', JavaCompile) {
+    source files('src/main/java/local/codex/voyahcameralab/FramePolicy.java',
+        'src/main/java/local/codex/voyahcameralab/TimestampClock.java',
+        'src/main/java/local/codex/voyahcameralab/CaptureGate.java',
+        'src/main/java/local/codex/voyahcameralab/FrameHealth.java',
+        '../tests/java/local/codex/voyahcameralab/PolicyTest.java')
+    classpath = files()
+    destinationDirectory.set(policyClasses)
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+tasks.register('corePolicyTest', JavaExec) {
+    dependsOn policyCompile
+    classpath = files(policyClasses)
+    mainClass.set('local.codex.voyahcameralab.PolicyTest')
+}
+tasks.named('check').configure { dependsOn 'corePolicyTest' }
