@@ -18,7 +18,7 @@ final class AvcRecorder {
     ContentValues values=new ContentValues();
     values.put(MediaStore.Video.Media.DISPLAY_NAME,"camera-"+cameraId+"-"+System.currentTimeMillis()+".mp4");
     values.put(MediaStore.Video.Media.MIME_TYPE,"video/mp4");
-    values.put(MediaStore.Video.Media.RELATIVE_PATH,"Movies/VoyahCameraLab");
+    values.put(MediaStore.Video.Media.RELATIVE_PATH,"Movies/VoyahCamera360DVR");
     values.put(MediaStore.Video.Media.IS_PENDING,1);
     Uri created=context.getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,values);
     if(created==null)throw new IllegalStateException("Cannot create output video");

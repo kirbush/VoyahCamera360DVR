@@ -1,0 +1,46 @@
+name: Publish release
+
+on:
+  push:
+    branches: [main]
+    paths: ['releases/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release files
+        id: release
+        run: python3 scripts/validate_release.py
+      - name: Publish APK and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          TITLE: ${{ steps.release.outputs.title }}
+          APK: ${{ steps.release.outputs.apk }}
+          CHECKSUMS: ${{ steps.release.outputs.checksums }}
+          NOTES: ${{ steps.release.outputs.notes }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; its assets will not be overwritten."
+            exit 0
+          fi
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "$APK" "$CHECKSUMS" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$TITLE" --notes-file "$NOTES" --draft "${flags[@]}"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

@@ -1,0 +1,8 @@
+{
+  "tag": "v0.3-alpha",
+  "title": "Voyah Camera 0.3-alpha",
+  "apk": "artifacts/Voyah-Camera-0.3.apk",
+  "checksums": "artifacts/SHA256SUMS",
+  "notes": "releases/v0.3-alpha.md",
+  "prerelease": true
+}

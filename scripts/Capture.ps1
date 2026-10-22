@@ -24,5 +24,5 @@ if($Mode -eq 'Mark'){& $Adb @deviceArguments shell log -t VoyahCameraLab -p i "T
 & $Adb @deviceArguments pull /sdcard/Android/data/local.codex.voyahcameralab/files/ (Join-Path $session.folder 'app-files')
 & $Adb @deviceArguments shell dumpsys media.camera | Set-Content -LiteralPath (Join-Path $session.folder 'media-camera.txt') -Encoding utf8
 & $Adb @deviceArguments shell dumpsys dls_vehicle_signal_service | Set-Content -LiteralPath (Join-Path $session.folder 'native360.txt') -Encoding utf8
-if($IncludeVideos){& $Adb @deviceArguments pull /sdcard/Movies/VoyahCameraLab/ (Join-Path $session.folder 'videos')}
+if($IncludeVideos){& $Adb @deviceArguments pull /sdcard/Movies/VoyahCamera360DVR/ (Join-Path $session.folder 'videos')}
 Write-Output "Saved: $($session.folder)"
