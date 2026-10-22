@@ -8,8 +8,10 @@
     <item name="camera_preview" type="id"/>
     <item name="status_text" type="id"/>
     <item name="crop_checkbox" type="id"/>
+    <item name="trim_padding_checkbox" type="id"/>
     <item name="avm_layout" type="id"/>
     <item name="settings_button" type="id"/>
+    <item name="advanced_settings_button" type="id"/>
     <item name="close_camera_button" type="id"/>
     <item name="auto_record_checkbox" type="id"/>
     <item name="switch_view_button" type="id"/>

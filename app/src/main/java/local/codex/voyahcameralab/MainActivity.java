@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
   private int selectedView,appliedView;private boolean switching,stallReported;private String viewError="";
   private CameraDevice camera;private CameraCaptureSession session;private GlCameraRenderer renderer;
   private volatile boolean resumed;private boolean opening,recording,recordStarting,recordStopping,autoPreview=true,autoRecord,autoClose,settingsVisible;
-  private boolean cameraOnly=true;private int layout,activeToken;private long frames,recordStartedAt;
+  private boolean cameraOnly=true,trimPadding;private int layout,activeToken;private long frames,recordStartedAt;
   private String selectedId="1",cameraId="",detail="",message="Подключение камеры…";private Uri lastVideo;
   private String[] cameraIds=new String[0];private JSONObject inventory;
   private final ExecutorService inventoryWorker=Executors.newSingleThreadExecutor();
@@ -51,7 +51,7 @@ public final class MainActivity extends Activity {
   @Override public void onCreate(Bundle state){
     super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON|WindowManager.LayoutParams.FLAG_FULLSCREEN);
     getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-    preferences=getSharedPreferences("camera",MODE_PRIVATE);selectedId=preferences.getString("camera_id","1");layout=preferences.getInt("layout",0);cameraOnly=preferences.getBoolean("camera_only",true);selectedView=preferences.getInt("view",0);
+    preferences=getSharedPreferences("camera",MODE_PRIVATE);selectedId=preferences.getString("camera_id","1");layout=preferences.getInt("layout",0);cameraOnly=preferences.getBoolean("camera_only",true);trimPadding=preferences.getBoolean("trim_padding",false);selectedView=preferences.getInt("view",0);
     String savedVideo=preferences.getString("last_video",null);if(savedVideo!=null)lastVideo=Uri.parse(savedVideo);
     manager=(CameraManager)getSystemService(CAMERA_SERVICE);main=new Handler(Looper.getMainLooper());
     captureThread=new HandlerThread("VoyahCameraCapture");captureThread.start();capture=new Handler(captureThread.getLooper());
@@ -107,13 +107,13 @@ public final class MainActivity extends Activity {
   private void refreshInventory(){
     try{cameraIds=manager.getCameraIdList();if(!Arrays.asList(cameraIds).contains(selectedId)){selectedId=Arrays.asList(cameraIds).contains("1")?"1":(cameraIds.length>0?cameraIds[0]:"");}maybeAutoStart();}
     catch(Exception error){setStatus("Камера недоступна: "+error.getMessage());}
-    inventoryWorker.execute(()->{try{JSONObject result=DeviceInventory.read(this,manager);writeLocal("inventory.json",result.toString(2));main.post(()->{if(!isDestroyed())inventory=result;});}catch(Exception error){android.util.Log.w("VoyahCameraLab","Inventory",error);}});
+    inventoryWorker.execute(()->{try{JSONObject result=DeviceInventory.read(this,manager);writeLocal("inventory.json",result.toString(2));main.post(()->{if(!isDestroyed()){inventory=result;updateUi();}});}catch(Exception error){android.util.Log.w("VoyahCameraLab","Inventory",error);}});
   }
   private void maybeAutoStart(){if(autoPreview&&resumed&&!settingsVisible&&texture.isAvailable()&&!selectedId.isEmpty()&&checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED){autoPreview=false;startPreview();}}
   private void startPreview(){
     if(!resumed||!texture.isAvailable()||opening||selectedId.isEmpty())return;
     if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){setStatus("Нужно разрешение на камеру");return;}
-    cameraId=selectedId;String id=cameraId;boolean useAvm="1".equals(id),only=cameraOnly;int chosenLayout=layout;
+    cameraId=selectedId;String id=cameraId;boolean useAvm="1".equals(id),only=cameraOnly,trim=trimPadding;int chosenLayout=layout;
     SurfaceTexture output=texture.getSurfaceTexture();int width=texture.getWidth(),height=texture.getHeight();
     int token=gate.begin();activeToken=token;opening=true;frames=0;health.reset();stallReported=false;appliedView=0;setStatus("Подключение камеры…");
     main.removeCallbacks(frameWatch);main.postDelayed(frameWatch,1000);
@@ -122,8 +122,8 @@ public final class MainActivity extends Activity {
       if(!gate.accepts(token)||!resumed)return;
       try{
         CameraCharacteristics characteristics=manager.getCameraCharacteristics(id);Size size=DeviceInventory.selectSize(characteristics,id);
-        Integer orientation=characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);FramePolicy policy=new FramePolicy(size.getWidth(),size.getHeight(),orientation==null?0:orientation,useAvm,chosenLayout,only);
-        detail=size.getWidth()+"×"+size.getHeight()+" → "+policy.outputWidth+"×"+policy.outputHeight;
+        Integer orientation=characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);FramePolicy policy=new FramePolicy(size.getWidth(),size.getHeight(),orientation==null?0:orientation,useAvm,chosenLayout,only,trim);
+        detail=size.getWidth()+"×"+size.getHeight()+" → "+policy.outputWidth+"×"+policy.outputHeight+(policy.cropBottom>0?" · верхние 60%":"");
         renderer=new GlCameraRenderer(this,capture,output,width,height,size.getWidth(),size.getHeight(),policy,new GlCameraRenderer.Listener(){
           public void onFrame(long count){main.post(()->{if(!gate.accepts(token))return;frames=count;health.frame(SystemClock.elapsedRealtime());stallReported=false;if(autoRecord&&count>=3&&!switching){autoRecord=false;startRecording();}setStatus("Вход "+id+" · "+detail+" · кадров "+count);});}
           public void onError(String error){cameraFailure(token,error);}
@@ -188,34 +188,40 @@ public final class MainActivity extends Activity {
     });
   }
   private void updateUi(){
-    if(recordButton==null)return;boolean stalled=health.stalled(SystemClock.elapsedRealtime());recordButton.setEnabled(opening&&frames>0&&!stalled&&!switching&&!recording&&!recordStarting&&!recordStopping);stopButton.setEnabled(recording&&!recordStopping);
+    if(recordButton==null)return;
+    if(settingsDialog!=null){View report=settingsDialog.findViewById(R.id.report_button);if(report!=null)report.setEnabled(inventory!=null);}
+    boolean stalled=health.stalled(SystemClock.elapsedRealtime());recordButton.setEnabled(opening&&frames>0&&!stalled&&!switching&&!recording&&!recordStarting&&!recordStopping);stopButton.setEnabled(recording&&!recordStopping);
     viewButton.setEnabled(opening&&frames>0&&!switching&&"1".equals(cameraId));viewName.setText(switching?"…":appliedView==1?"Передняя":appliedView==2?"Задняя":"360");
     recordTime.setVisibility(recording||recordStarting?View.VISIBLE:View.GONE);if(recordStarting)recordTime.setText("●  Подготовка");else if(recordStopping)recordTime.setText("●  Сохранение");
     notice.setVisibility(opening&&frames>0&&!stalled?View.GONE:View.VISIBLE);notice.setText(stalled?"Нет новых кадров. Ожидаем видеопоток…":message);
   }
   private void setStatus(String value){
     message=value;updateUi();android.util.Log.i("VoyahCameraLab",value);
-    try{JSONObject state=new JSONObject();state.put("message",value);state.put("cameraId",cameraId);state.put("selectedId",selectedId);state.put("cameraOnly",cameraOnly);state.put("layout",layout);state.put("selectedView",selectedView);state.put("appliedView",appliedView);state.put("switchingView",switching);state.put("viewError",viewError);state.put("frameAgeMs",health.age(SystemClock.elapsedRealtime()));state.put("streamStalled",health.stalled(SystemClock.elapsedRealtime()));state.put("autoRecordOnOpen",preferences.getBoolean("auto_record",false));state.put("frames",frames);state.put("opening",opening);state.put("recording",recording);state.put("settingsVisible",settingsVisible);state.put("lastVideo",lastVideo==null?JSONObject.NULL:lastVideo.toString());state.put("updatedMs",System.currentTimeMillis());writeLocal("state.json",state.toString(2));}catch(Exception ignored){}
+    try{JSONObject state=new JSONObject();state.put("message",value);state.put("cameraId",cameraId);state.put("selectedId",selectedId);state.put("cameraOnly",cameraOnly);state.put("trimPadding",trimPadding);state.put("layout",layout);state.put("selectedView",selectedView);state.put("appliedView",appliedView);state.put("switchingView",switching);state.put("viewError",viewError);state.put("frameAgeMs",health.age(SystemClock.elapsedRealtime()));state.put("streamStalled",health.stalled(SystemClock.elapsedRealtime()));state.put("autoRecordOnOpen",preferences.getBoolean("auto_record",false));state.put("frames",frames);state.put("opening",opening);state.put("recording",recording);state.put("settingsVisible",settingsVisible);state.put("lastVideo",lastVideo==null?JSONObject.NULL:lastVideo.toString());state.put("updatedMs",System.currentTimeMillis());writeLocal("state.json",state.toString(2));}catch(Exception ignored){}
   }
   private void writeLocal(String name,String value)throws Exception{File directory=getExternalFilesDir(null);if(directory==null)directory=getFilesDir();try(FileOutputStream stream=new FileOutputStream(new File(directory,name))){stream.write(value.getBytes(StandardCharsets.UTF_8));}}
   private Button settingsAction(LinearLayout panel,String text,int id,Runnable action){Button button=new Button(this);button.setText(text);if(id!=0)button.setId(id);panel.addView(button,new LinearLayout.LayoutParams(-1,dp(48)));button.setOnClickListener(v->action.run());return button;}
   private void showSettings(){
     if(settingsVisible)return;settingsVisible=true;
     ScrollView scroll=new ScrollView(this);LinearLayout form=new LinearLayout(this);form.setOrientation(LinearLayout.VERTICAL);form.setPadding(dp(20),dp(8),dp(20),dp(8));form.setBackgroundColor(0xFF181B20);scroll.addView(form);
-    form.addView(label("Видеовход",16));Spinner source=new Spinner(this);source.setId(R.id.camera_picker);String[] ids=cameraIds.clone();String[] names=new String[ids.length];for(int i=0;i<ids.length;i++)names[i]=ids[i]+("1".equals(ids[i])?" · Камеры 360":" · Видеовход");source.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));form.addView(source,new LinearLayout.LayoutParams(-1,dp(48)));for(int i=0;i<ids.length;i++)if(ids[i].equals(selectedId))source.setSelection(i);
     form.addView(label("Компоновка источника",16));Spinner composition=new Spinner(this);composition.setId(R.id.avm_layout);composition.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Обычный 360","Парковщик"}));composition.setSelection(layout);form.addView(composition,new LinearLayout.LayoutParams(-1,dp(48)));
     CheckBox only=new CheckBox(this);only.setId(R.id.crop_checkbox);only.setText("Только вид камеры — без вида сверху");only.setTextColor(Color.WHITE);only.setChecked(cameraOnly);form.addView(only);
+    CheckBox trim=new CheckBox(this);trim.setId(R.id.trim_padding_checkbox);trim.setText("Убрать зелёный низ — верхние 60% кадра");trim.setTextColor(Color.WHITE);trim.setChecked(trimPadding);form.addView(trim);
     CheckBox automatic=new CheckBox(this);automatic.setId(R.id.auto_record_checkbox);automatic.setText("Начинать запись при открытии");automatic.setTextColor(Color.WHITE);automatic.setChecked(preferences.getBoolean("auto_record",false));form.addView(automatic);
-    form.addView(label("Ракурс 360 при открытии",16));Spinner viewPicker=new Spinner(this);viewPicker.setId(R.id.view_picker);viewPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Текущий — не переключать","Передняя камера","Задняя камера"}));viewPicker.setSelection(selectedView);form.addView(viewPicker,new LinearLayout.LayoutParams(-1,dp(48)));
-    form.addView(label("Переключение перед/зад использует имеющийся доступ su. Без него доступен текущий ракурс 360.\nВидео: Movies/VoyahCamera360DVR",13));
+    form.addView(label("Видео: Movies/VoyahCamera360DVR",13));
     TextView diagnostic=label("Вход "+selectedId+" · "+detail,12);form.addView(diagnostic);
-    settingsAction(form,"Переподключить камеру",R.id.preview_button,()->{settingsDialog.dismiss();closeCamera("Подключение камеры…");startPreview();});
-    settingsAction(form,"Освободить камеру",R.id.close_camera_button,()->{settingsDialog.dismiss();closeCamera("Камера освобождена. Коснитесь для подключения.");});
-    Button video=settingsAction(form,"Последняя запись",R.id.video_button,()->{settingsDialog.dismiss();viewVideo();});video.setEnabled(lastVideo!=null);
-    settingsAction(form,"Сохранить технический отчёт",R.id.report_button,this::exportReport);
+    Button video=settingsAction(form,"Последняя запись",R.id.video_button,()->{settingsDialog.dismiss();viewVideo();});video.setVisibility(lastVideo==null?View.GONE:View.VISIBLE);
+    Button report=settingsAction(form,"Сохранить технический отчёт",R.id.report_button,this::exportReport);report.setEnabled(inventory!=null);
+    LinearLayout advanced=new LinearLayout(this);advanced.setOrientation(LinearLayout.VERTICAL);advanced.setVisibility(View.GONE);
+    settingsAction(form,"Дополнительно",R.id.advanced_settings_button,()->{boolean show=advanced.getVisibility()!=View.VISIBLE;advanced.setVisibility(show?View.VISIBLE:View.GONE);((Button)form.findViewById(R.id.advanced_settings_button)).setText(show?"Скрыть дополнительные настройки":"Дополнительно");});form.addView(advanced);
+    advanced.addView(label("Видеовход",16));Spinner source=new Spinner(this);source.setId(R.id.camera_picker);String[] ids=cameraIds.clone();String[] names=new String[ids.length];for(int i=0;i<ids.length;i++)names[i]=ids[i]+("1".equals(ids[i])?" · Камеры 360":" · Видеовход");source.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));advanced.addView(source,new LinearLayout.LayoutParams(-1,dp(48)));for(int i=0;i<ids.length;i++)if(ids[i].equals(selectedId))source.setSelection(i);
+    advanced.addView(label("Ракурс при открытии (экспериментально)",16));Spinner viewPicker=new Spinner(this);viewPicker.setId(R.id.view_picker);viewPicker.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Текущий — не переключать","Передняя камера","Задняя камера"}));viewPicker.setSelection(selectedView);advanced.addView(viewPicker,new LinearLayout.LayoutParams(-1,dp(48)));
+    advanced.addView(label("Выбор видеовхода нужен для диагностики. Переключение перед/зад требует совместимой прошивки и доступа su; на других ГУ может быть недоступно.",13));
+    settingsAction(advanced,"Переподключить камеру",R.id.preview_button,()->{settingsDialog.dismiss();closeCamera("Подключение камеры…");startPreview();});
+    settingsAction(advanced,"Освободить камеру",R.id.close_camera_button,()->{settingsDialog.dismiss();closeCamera("Камера освобождена. Коснитесь для подключения.");});
     settingsDialog=new AlertDialog.Builder(this,AlertDialog.THEME_DEVICE_DEFAULT_DARK).setTitle("Настройки").setView(scroll).setNegativeButton("Отмена",null).setPositiveButton("Применить",(dialog,which)->{
-      String next=ids.length>0?ids[Math.max(0,source.getSelectedItemPosition())]:selectedId;boolean changed=!next.equals(selectedId)||layout!=composition.getSelectedItemPosition()||cameraOnly!=only.isChecked()||selectedView!=viewPicker.getSelectedItemPosition();
-      selectedId=next;layout=composition.getSelectedItemPosition();cameraOnly=only.isChecked();selectedView=viewPicker.getSelectedItemPosition();preferences.edit().putString("camera_id",selectedId).putInt("layout",layout).putInt("view",selectedView).putBoolean("camera_only",cameraOnly).putBoolean("auto_record",automatic.isChecked()).apply();
+      String next=ids.length>0?ids[Math.max(0,source.getSelectedItemPosition())]:selectedId;boolean changed=!next.equals(selectedId)||layout!=composition.getSelectedItemPosition()||cameraOnly!=only.isChecked()||trimPadding!=trim.isChecked()||selectedView!=viewPicker.getSelectedItemPosition();
+      selectedId=next;layout=composition.getSelectedItemPosition();cameraOnly=only.isChecked();trimPadding=trim.isChecked();selectedView=viewPicker.getSelectedItemPosition();preferences.edit().putString("camera_id",selectedId).putInt("layout",layout).putInt("view",selectedView).putBoolean("camera_only",cameraOnly).putBoolean("trim_padding",trimPadding).putBoolean("auto_record",automatic.isChecked()).apply();
       if(changed){closeCamera("Подключение камеры…");startPreview();}
     }).create();
     settingsDialog.setOnDismissListener(dialog->{settingsVisible=false;settingsDialog=null;});settingsDialog.show();

@@ -13,6 +13,17 @@ public final class PolicyTest {
     check(view.outputWidth==1200&&view.outputHeight==720&&view.cropLeft==0.375f&&view.cropRight==1f,"Ordinary360 camera-only excludes toolbar and birdseye");
     FramePolicy scaledAvm=new FramePolicy(1920,1080,0,true);
     check(scaledAvm.outputWidth==1920&&scaledAvm.outputHeight==720,"Normalize HAL-scaled AVM1080 back to its720-line geometry");
+    FramePolicy padded=new FramePolicy(1920,1080,0,true,0,true,true);
+    check(Math.abs(padded.cropBottom-0.4f)<0.00001f&&padded.cropTop==1f,"Padded AVM samples only the displayed top60 percent");
+    check(padded.outputWidth==1200&&padded.outputHeight==720,"Padded camera view restores1200x720 geometry instead of shortening output");
+    int firstSourceRow=(int)(1200*(1-(padded.cropBottom+(1-0.5/padded.outputHeight)*(padded.cropTop-padded.cropBottom))));
+    int lastSourceRow=(int)(1200*(1-(padded.cropBottom+(0.5/padded.outputHeight)*(padded.cropTop-padded.cropBottom))));
+    check(firstSourceRow==0&&lastSourceRow==719,"Sampling covers the full720-line image and excludes rows720..1199 of a padded source");
+    check(view.cropBottom==0f&&view.cropTop==1f,"Unpadded/default mode preserves the full texture height");
+    FramePolicy paddedApa=new FramePolicy(1920,1080,90,true,1,true,true);
+    check(paddedApa.outputWidth==720&&paddedApa.outputHeight==880&&paddedApa.cropBottom==padded.cropBottom,"APA crop preserves source bounds and rotated geometry");
+    FramePolicy other=new FramePolicy(1280,720,0,false,0,false,true);
+    check(other.cropBottom==0f&&other.cropTop==1f,"Non-AVM inputs ignore the padding option");
     FramePolicy rotated=new FramePolicy(1280,720,90,false);
     check(rotated.outputWidth==720&&rotated.outputHeight==1280,"Portrait sensor rotation");
     int[] fit=avm.fit(1000,600);

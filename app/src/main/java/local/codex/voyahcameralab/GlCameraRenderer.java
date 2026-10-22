@@ -16,7 +16,7 @@ final class GlCameraRenderer {
   private final Surface displaySurface;private EGLDisplay display;private EGLContext eglContext;private EGLConfig config;
   private EGLSurface preview,encoder=EGL14.EGL_NO_SURFACE;private AvcRecorder recorder;
   private final float[] transform=new float[16];private final FloatBuffer vertices;
-  private int program,texture,position,coordinates,matrix,crop,cropLeft,rotation,width,height;private long frames;private boolean closed;
+  private int program,texture,position,coordinates,matrix,crop,cropLeft,vertical,rotation,width,height;private long frames;private boolean closed;
   GlCameraRenderer(Context context,Handler handler,SurfaceTexture output,int windowWidth,int windowHeight,int inputWidth,int inputHeight,FramePolicy policy,Listener listener) throws Exception {
     this.context=context;this.listener=listener;this.policy=policy;width=windowWidth;height=windowHeight;
     displaySurface=new Surface(output);
@@ -34,12 +34,12 @@ final class GlCameraRenderer {
     GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_WRAP_S,GLES20.GL_CLAMP_TO_EDGE);
     GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,GLES20.GL_TEXTURE_WRAP_T,GLES20.GL_CLAMP_TO_EDGE);
     String vertex="attribute vec2 aPosition;attribute vec2 aTex;varying vec2 vTex;void main(){gl_Position=vec4(aPosition,0.,1.);vTex=aTex;}";
-    String fragment="#extension GL_OES_EGL_image_external : require\nprecision mediump float;uniform samplerExternalOES image;uniform mat4 uMatrix;uniform float uCrop;uniform float uLeft;uniform float uRotation;varying vec2 vTex;void main(){vec2 uv=vTex;if(uRotation==90.)uv=vec2(vTex.y,1.-vTex.x);else if(uRotation==180.)uv=vec2(1.-vTex.x,1.-vTex.y);else if(uRotation==270.)uv=vec2(1.-vTex.y,vTex.x);uv.x=uLeft+uv.x*(uCrop-uLeft);vec2 sampleAt=(uMatrix*vec4(uv,0.,1.)).xy;gl_FragColor=texture2D(image,sampleAt);}";
+    String fragment="#extension GL_OES_EGL_image_external : require\nprecision mediump float;uniform samplerExternalOES image;uniform mat4 uMatrix;uniform float uCrop;uniform float uLeft;uniform vec2 uVertical;uniform float uRotation;varying vec2 vTex;void main(){vec2 uv=vTex;if(uRotation==90.)uv=vec2(vTex.y,1.-vTex.x);else if(uRotation==180.)uv=vec2(1.-vTex.x,1.-vTex.y);else if(uRotation==270.)uv=vec2(1.-vTex.y,vTex.x);uv.x=uLeft+uv.x*(uCrop-uLeft);uv.y=uVertical.x+uv.y*(uVertical.y-uVertical.x);vec2 sampleAt=(uMatrix*vec4(uv,0.,1.)).xy;gl_FragColor=texture2D(image,sampleAt);}";
     int v=shader(GLES20.GL_VERTEX_SHADER,vertex),f=shader(GLES20.GL_FRAGMENT_SHADER,fragment);
     program=GLES20.glCreateProgram();GLES20.glAttachShader(program,v);GLES20.glAttachShader(program,f);GLES20.glLinkProgram(program);
     int[] linked=new int[1];GLES20.glGetProgramiv(program,GLES20.GL_LINK_STATUS,linked,0);if(linked[0]!=GLES20.GL_TRUE)throw new IllegalStateException(GLES20.glGetProgramInfoLog(program));
     GLES20.glDeleteShader(v);GLES20.glDeleteShader(f);
-    position=GLES20.glGetAttribLocation(program,"aPosition");coordinates=GLES20.glGetAttribLocation(program,"aTex");matrix=GLES20.glGetUniformLocation(program,"uMatrix");crop=GLES20.glGetUniformLocation(program,"uCrop");cropLeft=GLES20.glGetUniformLocation(program,"uLeft");rotation=GLES20.glGetUniformLocation(program,"uRotation");
+    position=GLES20.glGetAttribLocation(program,"aPosition");coordinates=GLES20.glGetAttribLocation(program,"aTex");matrix=GLES20.glGetUniformLocation(program,"uMatrix");crop=GLES20.glGetUniformLocation(program,"uCrop");cropLeft=GLES20.glGetUniformLocation(program,"uLeft");vertical=GLES20.glGetUniformLocation(program,"uVertical");rotation=GLES20.glGetUniformLocation(program,"uRotation");
     vertices=ByteBuffer.allocateDirect(16*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     vertices.put(new float[]{-1,-1,0,0,1,-1,1,0,-1,1,0,1,1,1,1,1}).position(0);
     cameraTexture=new SurfaceTexture(texture);cameraTexture.setDefaultBufferSize(inputWidth,inputHeight);
@@ -56,7 +56,7 @@ final class GlCameraRenderer {
     GLES20.glUseProgram(program);GLES20.glActiveTexture(GLES20.GL_TEXTURE0);GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,texture);
     vertices.position(0);GLES20.glVertexAttribPointer(position,2,GLES20.GL_FLOAT,false,16,vertices);GLES20.glEnableVertexAttribArray(position);
     vertices.position(2);GLES20.glVertexAttribPointer(coordinates,2,GLES20.GL_FLOAT,false,16,vertices);GLES20.glEnableVertexAttribArray(coordinates);
-    GLES20.glUniformMatrix4fv(matrix,1,false,transform,0);GLES20.glUniform1f(crop,policy.cropRight);GLES20.glUniform1f(cropLeft,policy.cropLeft);GLES20.glUniform1f(rotation,policy.rotation);
+    GLES20.glUniformMatrix4fv(matrix,1,false,transform,0);GLES20.glUniform1f(crop,policy.cropRight);GLES20.glUniform1f(cropLeft,policy.cropLeft);GLES20.glUniform1f(rotation,policy.rotation);GLES20.glUniform2f(vertical,policy.cropBottom,policy.cropTop);
     GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP,0,4);
     int error=GLES20.glGetError();if(error!=GLES20.GL_NO_ERROR)throw new IllegalStateException("GL error 0x"+Integer.toHexString(error));
   }

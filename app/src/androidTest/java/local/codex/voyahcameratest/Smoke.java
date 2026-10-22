@@ -12,11 +12,11 @@ public final class Smoke extends Instrumentation {
   void finishActivity(){runOnMainSync(()->activity.finish());waitForIdleSync();SystemClock.sleep(700);}
   void click(String name){runOnMainSync(()->{View v=activity.findViewById(id(name));check(v!=null&&v.isEnabled(),"Control missing/disabled: "+name);v.performClick();});waitForIdleSync();}
   AlertDialog dialog()throws Exception{java.lang.reflect.Field f=activity.getClass().getDeclaredField("settingsDialog");f.setAccessible(true);return (AlertDialog)f.get(activity);}
-  void settings()throws Exception{click("settings_button");check(dialog()!=null,"Gear must open settings");}
+  void settings()throws Exception{click("settings_button");check(dialog()!=null,"Gear must open settings");AlertDialog d=dialog();runOnMainSync(()->{check(d.findViewById(id("trim_padding_checkbox")).isShown(),"Image crop must be visible in basic settings");check(!d.findViewById(id("camera_picker")).isShown()&&!d.findViewById(id("view_picker")).isShown(),"Diagnostic inputs and experimental views must be hidden by default");d.findViewById(id("advanced_settings_button")).performClick();check(d.findViewById(id("camera_picker")).isShown()&&d.findViewById(id("view_picker")).isShown(),"Additional settings button must reveal real controls");d.findViewById(id("advanced_settings_button")).performClick();});}
   void toggle(String name,boolean value)throws Exception{AlertDialog d=dialog();runOnMainSync(()->((CheckBox)d.findViewById(id(name))).setChecked(value));}
   void apply()throws Exception{AlertDialog d=dialog();runOnMainSync(()->d.getButton(AlertDialog.BUTTON_POSITIVE).performClick());waitForIdleSync();}
   public void onStart(){Bundle result=new Bundle();JSONObject report=new JSONObject();try{
-    getTargetContext().getSharedPreferences("camera",0).edit().putString("camera_id","1").putInt("view",0).putBoolean("camera_only",true).putInt("layout",0).putBoolean("auto_record",false).commit();
+    getTargetContext().getSharedPreferences("camera",0).edit().putString("camera_id","1").putInt("view",0).putBoolean("camera_only",true).putBoolean("trim_padding",false).putInt("layout",0).putBoolean("auto_record",false).commit();
     launch();waitFor("launch starts preview, recording defaults off",s->s.getBoolean("opening")&&s.getLong("frames")>=3&&!s.getBoolean("recording"));
     runOnMainSync(()->check(activity.findViewById(id("camera_picker"))==null,"Settings must be hidden on main screen"));
     click("record_button");waitFor("manual recording starts",s->s.getBoolean("recording"));SystemClock.sleep(12000);check(state().getBoolean("recording"),"Recording must exceed old 10 second limit");
@@ -26,6 +26,9 @@ public final class Smoke extends Instrumentation {
     settings();toggle("auto_record_checkbox",false);toggle("crop_checkbox",false);apply();finishActivity();launch();
     waitFor("saved crop and auto-record disabled survive restart",s->s.getBoolean("opening")&&s.getLong("frames")>=3&&!s.getBoolean("recording")&&!s.getBoolean("autoRecordOnOpen")&&!s.getBoolean("cameraOnly"));
     settings();toggle("crop_checkbox",true);apply();waitFor("restore camera-only view",s->s.getBoolean("cameraOnly")&&s.getBoolean("opening")&&s.getLong("frames")>=3);
+    settings();toggle("trim_padding_checkbox",true);apply();finishActivity();launch();
+    waitFor("vertical crop persists after restart",s->s.getBoolean("trimPadding")&&s.getBoolean("opening")&&s.getLong("frames")>=3&&!s.getBoolean("recording"));
+    settings();toggle("trim_padding_checkbox",false);apply();waitFor("restore full-height sampling",s->!s.getBoolean("trimPadding")&&s.getBoolean("opening")&&s.getLong("frames")>=3);
     runOnMainSync(()->{ViewGroup content=activity.findViewById(android.R.id.content);View root=content.getChildAt(0);ViewGroup.LayoutParams lp=root.getLayoutParams();lp.width=600;lp.height=320;root.setLayoutParams(lp);});waitForIdleSync();SystemClock.sleep(1000);
     runOnMainSync(()->{View root=((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0);View rec=activity.findViewById(id("record_button"));int[] rp=new int[2],bp=new int[2];root.getLocationOnScreen(rp);rec.getLocationOnScreen(bp);check(rec.getWidth()>0&&bp[1]>=rp[1]&&bp[1]+rec.getHeight()<=rp[1]+root.getHeight(),"Recording controls must fit 600x320 window");});
     check(state().getBoolean("opening"),"Small-window preview must remain open");report.put("smallWindow","600x320 controls fit; preview remains open");finishActivity();

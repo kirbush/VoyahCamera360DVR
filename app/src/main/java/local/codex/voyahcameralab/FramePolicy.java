@@ -1,13 +1,18 @@
 package local.codex.voyahcameralab;
 final class FramePolicy {
-  final int outputWidth,outputHeight,rotation;final float cropLeft,cropRight;
+  final int outputWidth,outputHeight,rotation;final float cropLeft,cropRight,cropBottom,cropTop;
   FramePolicy(int width,int height,int rotation,boolean avm){
     this(width,height,rotation,avm,0,false);
   }
   FramePolicy(int width,int height,int rotation,boolean avm,int layout,boolean cameraOnly){
+    this(width,height,rotation,avm,layout,cameraOnly,false);
+  }
+  FramePolicy(int width,int height,int rotation,boolean avm,int layout,boolean cameraOnly,boolean trimPadding){
     if(width<=0||height<=0)throw new IllegalArgumentException("Invalid image size");
     this.rotation=((rotation%360)+360)%360;
     boolean avmGeometry=avm&&width==1920&&(height==720||height==1080||height==1200);
+    // Logical texture top is v=1 before SurfaceTexture's producer transform.
+    this.cropBottom=avmGeometry&&trimPadding?0.4f:0f;this.cropTop=1f;
     this.cropRight=avmGeometry&&layout==1?0.75f:1f;
     this.cropLeft=avmGeometry&&cameraOnly?(layout==1?560f/1920f:720f/1920f):0f;
     int visibleWidth=Math.round(width*(cropRight-cropLeft));

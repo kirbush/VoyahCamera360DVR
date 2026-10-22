@@ -13,7 +13,8 @@ import java.util.*;
 final class DeviceInventory {
   static JSONObject read(Context context,CameraManager manager) throws Exception {
     JSONObject root=new JSONObject();
-    root.put("application","Voyah Camera Lab 0.1 diagnostic");
+    root.put("application","VoyahCamera360DVR");
+    root.put("version",context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName);
     root.put("sdk",Build.VERSION.SDK_INT);root.put("fingerprint",Build.FINGERPRINT);
     root.put("device",Build.DEVICE);root.put("capturedAtMs",System.currentTimeMillis());
     root.put("note","Camera ID is not a physical front/rear label. ID1 is the confirmed composite AVM path on the tested H97X.");

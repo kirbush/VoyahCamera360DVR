@@ -14,5 +14,6 @@ diagnostics/
 *.pem
 *.apk
 !artifacts/Voyah-Camera-0.3.apk
+!artifacts/Voyah-Camera-0.4.apk
 __pycache__/
 
